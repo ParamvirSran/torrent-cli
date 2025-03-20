@@ -16,12 +16,18 @@ import (
 )
 
 const (
-	defaultPort        = "6881"
-	startEvent         = "started"
-	maxConcurrentPeers = 10
+	defaultPort = "6881"
+	startEvent  = "started"
 )
 
-var pieceSize int
+type TorrentStats struct {
+	PieceSize  int
+	PieceCount int
+	Downloaded int
+	Uploaded   int
+	TotalSize  int
+	Left       int
+}
 
 func main() {
 	logFile, err := setupLogging()
@@ -34,13 +40,13 @@ func main() {
 	log.Println("Starting")
 
 	torrentPath := parseArgs()
-	torrentFile, infohash, peerID, err := initializeTorrent(torrentPath)
+	torrentStats, torrentFile, infohash, peerID, err := initializeTorrent(torrentPath)
 	if err != nil {
 		fmt.Printf("Failed to initialize torrent: %v", err)
 		os.Exit(1)
 	}
 
-	peerIDList, peerAddressList, err := getPeers(torrentFile, infohash, peerID)
+	peerIDList, peerAddressList, err := getPeers(torrentStats, torrentFile, infohash, peerID) // Pass pointer
 	if err != nil {
 		fmt.Printf("Failed to get peers: %v", err)
 		os.Exit(1)
@@ -50,10 +56,10 @@ func main() {
 	defer cancel()
 
 	go peerManager(torrentFile, ctx, peerIDList, peerAddressList, infohash, peerID)
-	go monitorDownloadCompletion(ctx, cancel, torrentFile)
+	go monitorDownloadCompletion(ctx, cancel, torrentFile, torrentStats) // Pass pointer
 
 	<-ctx.Done()
-	log.Printf("Exiting. Context error: %v", ctx.Err())
+	log.Printf("Exiting. Context finished with error: %v", ctx.Err())
 }
 
 func setupLogging() (*os.File, error) {
@@ -63,49 +69,51 @@ func setupLogging() (*os.File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open log file: %v", err)
 	}
-
 	return logFile, nil
 }
 
 func parseArgs() string {
 	if len(os.Args) < 2 {
-		fmt.Printf("Usage: %s <torrent-file>\n", os.Args[0])
+		fmt.Printf("Usage: %s <torrent-file>", os.Args[0])
 		os.Exit(1)
 	}
 	return os.Args[1]
 }
 
-func initializeTorrent(torrentPath string) (*types.Torrent, []byte, []byte, error) {
+func initializeTorrent(torrentPath string) (*TorrentStats, *types.Torrent, []byte, []byte, error) {
 	torrentFile, err := torrent.ParseTorrentFile(torrentPath)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error parsing torrent file (%s): %w", torrentPath, err)
+		return nil, nil, nil, nil, fmt.Errorf("error parsing torrent file (%s): %w", torrentPath, err)
 	}
-	pieceSize = torrentFile.Info.PieceLength
+
+	torrentStats := TorrentStats{
+		PieceSize:  torrentFile.Info.PieceLength,
+		PieceCount: len(torrentFile.Info.Pieces) / 20,
+		Downloaded: 0,
+		Uploaded:   0,
+		TotalSize:  torrentFile.Info.PieceLength * len(torrentFile.Info.Pieces) / 20,
+		Left:       torrentFile.Info.PieceLength * len(torrentFile.Info.Pieces) / 20,
+	}
 
 	infohash, err := torrent.GetInfohash(torrentFile.Info)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error getting infohash: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("error getting infohash: %w", err)
 	}
 
 	peerID, err := torrent.GeneratePeerID()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error generating peerID: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("error generating peerID: %w", err)
 	}
-
-	return torrentFile, infohash, []byte(peerID), nil
+	return &torrentStats, torrentFile, infohash, []byte(peerID), nil
 }
 
-func getPeers(torrentFile *types.Torrent, infoHash, peerID []byte) ([]string, []string, error) {
+func getPeers(ts *TorrentStats, torrentFile *types.Torrent, infoHash, peerID []byte) ([]string, []string, error) {
 	trackerList := torrent.GatherTrackers(torrentFile)
 	if len(trackerList) == 0 {
 		return nil, nil, fmt.Errorf("no valid trackers found")
 	}
 
-	left := torrentFile.Info.PieceLength * (len(torrentFile.Info.Pieces) / 20)
-	log.Printf("Torrent Stats - Piece Count: %d - Piece Size: %d - Left to Download: %d", len(torrentFile.Info.Pieces)/20, torrentFile.Info.PieceLength, left)
-
-	uploaded, downloaded := 0, 0
-	peerIDList, peerAddressList, err := torrent.ContactTrackers(trackerList, string(infoHash), string(peerID), startEvent, uploaded, downloaded, left, defaultPort)
+	peerIDList, peerAddressList, err := torrent.ContactTrackers(trackerList, string(infoHash), string(peerID), startEvent, ts.Uploaded, ts.Downloaded, ts.Left, defaultPort)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error contacting trackers: %w", err)
 	}
@@ -113,13 +121,11 @@ func getPeers(torrentFile *types.Torrent, infoHash, peerID []byte) ([]string, []
 	if len(peerAddressList) == 0 {
 		return nil, nil, fmt.Errorf("no peers found from trackers")
 	}
-
 	return peerIDList, peerAddressList, nil
 }
 
 func peerManager(torrentFile *types.Torrent, ctx context.Context, peerIDList, peerAddressList []string, infohash, clientID []byte) {
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, maxConcurrentPeers)
 	pm := torrentFile.PieceManager
 
 	for i := range peerAddressList {
@@ -127,17 +133,15 @@ func peerManager(torrentFile *types.Torrent, ctx context.Context, peerIDList, pe
 		case <-ctx.Done():
 			log.Println("Context canceled, stopping peer connections.")
 			return
+
 		default:
-			sem <- struct{}{}
 			wg.Add(1)
+
 			go func(peerID, peerAddress string) {
 				defer wg.Done()
-				defer func() { <-sem }()
 
 				if err := peers.HandlePeerConnection(pm, ctx, peerID, infohash, clientID, peerAddress); err != nil {
 					log.Printf("Failed with Peer: %s - %v", peerAddress, err)
-				} else {
-					log.Printf("Done with Peer: %s", peerAddress)
 				}
 			}(peerIDList[i], peerAddressList[i])
 		}
@@ -146,19 +150,23 @@ func peerManager(torrentFile *types.Torrent, ctx context.Context, peerIDList, pe
 	log.Println("All peer connections finished. Peer manager finished")
 }
 
-func monitorDownloadCompletion(ctx context.Context, cancel context.CancelFunc, torrentFile *types.Torrent) {
-	ticker := time.NewTicker(1 * time.Minute)
+func monitorDownloadCompletion(ctx context.Context, cancel context.CancelFunc, torrentFile *types.Torrent, ts *TorrentStats) {
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
 			if torrentFile.PieceManager.IsDownloadComplete() {
-				log.Println("Torrent download complete.")
-				cancel()
+				log.Println("Torrent download complete. Stopping download manager.")
+				cancel() // Graceful shutdown
 				return
 			}
+			ts.Downloaded = torrentFile.PieceManager.DownloadedCount * ts.PieceSize
+			ts.Left = ts.TotalSize - ts.Downloaded
+			log.Printf("Torrent Status: Pieces: %d - Downloaded = %d bytes - Total: %d bytes - Left: %d bytes", torrentFile.PieceManager.DownloadedCount, ts.Downloaded, ts.TotalSize, ts.Left)
 		case <-ctx.Done():
+			log.Println("Monitor exiting due to context cancellation.")
 			return
 		}
 	}

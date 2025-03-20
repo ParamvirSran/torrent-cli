@@ -17,8 +17,8 @@ import (
 const (
 	HandshakeResponseLength = 68
 	KeepAliveInterval       = 30 * time.Second
-	PeerTimeout             = 120 * time.Second
-	BlockSize               = 16384
+	PeerTimeout             = 3 * time.Minute
+	BlockSize               = 16384 // 16 kb
 )
 
 // HandlePeerConnection manages a single peer connection
@@ -26,7 +26,8 @@ func HandlePeerConnection(pm *types.PieceManager, ctx context.Context, peerID st
 	peerContext, peerCancel := context.WithCancel(ctx)
 	defer peerCancel()
 
-	peer := createPeer(peerID, peerAddress)
+	peer := types.NewPeer(peerID, peerAddress)
+
 	handshake, err := types.NewHandshake(infoHash, clientID)
 	if err != nil {
 		return fmt.Errorf("error creating handshake: %v", err)
@@ -48,7 +49,6 @@ func HandlePeerConnection(pm *types.PieceManager, ctx context.Context, peerID st
 
 	stopKeepAlive := startKeepAlive(peerContext, conn)
 	defer stopKeepAlive()
-
 	return processMessages(peerContext, conn, peer, pm)
 }
 
@@ -78,7 +78,6 @@ func receiveHandshakeResponse(peerID string, conn net.Conn, infoHash []byte) err
 	if err != nil {
 		return fmt.Errorf("failed to read handshake response: %v", err)
 	}
-
 	if err := types.ValidateHandshakeResponse(response[:n], [20]byte(infoHash)); err != nil {
 		return fmt.Errorf("invalid handshake response: %v", err)
 	}
@@ -118,19 +117,17 @@ func processMessages(ctx context.Context, conn net.Conn, peer *types.Peer, pm *t
 			return nil
 		default:
 			conn.SetReadDeadline(time.Now().Add(PeerTimeout))
-			msg, err := ReadMessage(conn)
+			msg, err := readMessage(conn)
 			if err != nil {
 				if errors.Is(err, io.EOF) {
 					continue
 				}
 				return fmt.Errorf("error reading message: %v", err)
 			}
-
 			if msg.ID != nil {
 				handleMessage(conn, ctx, pm, peer, msg)
 				lastActivity = time.Now()
 			}
-
 			if time.Since(lastActivity) > PeerTimeout {
 				return fmt.Errorf("peer %s timed out", peer.Address)
 			}
@@ -194,12 +191,11 @@ func worker(peer *types.Peer, ctx context.Context, pm *types.PieceManager, index
 
 	// Wait for UNCHOKE message from the peer
 	for {
-		msg, err := ReadMessage(conn)
+		msg, err := readMessage(conn)
 		if err != nil {
 			log.Printf("worker: Error reading UNCHOKE message: %v", err)
 			return
 		}
-
 		if msg.ID != nil && *msg.ID == types.MsgUnchoke {
 			peer.PeerState.PeerChoking = false
 			break
@@ -230,7 +226,7 @@ func worker(peer *types.Peer, ctx context.Context, pm *types.PieceManager, index
 			}
 
 			// Read the PIECE message response
-			msg, err := ReadMessage(conn)
+			msg, err := readMessage(conn)
 			if err != nil {
 				log.Printf("worker: Error reading PIECE message for piece %d, offset %d: %v", index, offset, err)
 				return
@@ -252,6 +248,7 @@ func worker(peer *types.Peer, ctx context.Context, pm *types.PieceManager, index
 				// Copy the block into the piece
 				copy(piece[offset:offset+blockSize], block)
 				offset += blockSize
+
 			} else if msg.ID != nil && *msg.ID == types.MsgChoke {
 				// Handle peer choking
 				peer.PeerState.PeerChoking = true
@@ -274,13 +271,12 @@ func worker(peer *types.Peer, ctx context.Context, pm *types.PieceManager, index
 	}
 }
 
-// ReadMessage reads a message from a connection
-func ReadMessage(conn net.Conn) (types.Message, error) {
+// readMessage reads a message from a connection
+func readMessage(conn net.Conn) (types.Message, error) {
 	var length uint32
 	if err := binary.Read(conn, binary.BigEndian, &length); err != nil {
 		return types.Message{}, err
 	}
-
 	if length == 0 {
 		return types.Message{ID: nil, Payload: nil}, nil // Keep-alive message
 	}
@@ -289,7 +285,6 @@ func ReadMessage(conn net.Conn) (types.Message, error) {
 	if _, err := io.ReadFull(conn, buf); err != nil {
 		return types.Message{}, err
 	}
-
 	if len(buf) < 1 {
 		return types.Message{}, fmt.Errorf("invalid message: no message ID")
 	}
@@ -299,18 +294,4 @@ func ReadMessage(conn net.Conn) (types.Message, error) {
 		ID:      &messageId,
 		Payload: buf[1:],
 	}, nil
-}
-
-// createPeer initializes a new peer object
-func createPeer(peerID, address string) *types.Peer {
-	return &types.Peer{
-		PeerID:  peerID,
-		Address: address,
-		PeerState: types.PeerState{
-			AmChoking:      true,
-			AmInterested:   false,
-			PeerChoking:    true,
-			PeerInterested: false,
-		},
-	}
 }

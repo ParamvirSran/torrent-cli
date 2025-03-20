@@ -13,7 +13,6 @@ func (h *Handshake) SerializeHandshake() []byte {
 	buf.Write(h.Reserved[:])
 	buf.Write(h.Infohash[:])
 	buf.Write(h.PeerID[:])
-
 	return buf.Bytes()
 }
 
@@ -22,11 +21,8 @@ func ValidateHandshakeResponse(response []byte, expectedInfoHash [20]byte) error
 	if len(response) < 68 {
 		return fmt.Errorf("handshake response too short: %d bytes", len(response))
 	}
-
-	infoHash := [20]byte(response[28:48])
-	if !bytes.Equal(infoHash[:], expectedInfoHash[:]) {
+	if infoHash := [20]byte(response[28:48]); !bytes.Equal(infoHash[:], expectedInfoHash[:]) {
 		return fmt.Errorf("invalid info hash: expected %x, got %x", expectedInfoHash, infoHash)
 	}
-
 	return nil
 }

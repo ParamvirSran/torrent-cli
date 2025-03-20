@@ -7,15 +7,10 @@ import (
 	"log"
 )
 
-const (
-	maxFailedAttempts = 3
-)
-
 // AddPiece adds a piece to the piece manager
 func (pm *PieceManager) AddPiece(index int, hash []byte) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-
 	pm.pieces[index] = NewPiece(hash)
 }
 
@@ -31,7 +26,6 @@ func (pm *PieceManager) RequeuePiece(index int) {
 		piece.IsDownloaded = false
 		piece.IsClaimed = false
 		piece.Data = nil // Clear the pointer to avoid memory leaks
-
 		log.Printf("Piece %d re-queued for download", index)
 	}
 }
@@ -43,12 +37,8 @@ func (pm *PieceManager) IsDownloadComplete() bool {
 
 	if pm.DownloadedCount == len(pm.pieces) {
 		log.Println("Download complete!")
-
 		return true
 	}
-	log.Printf("Downloaded Pieces: %d\nTotal Pieces: %d", pm.DownloadedCount, len(pm.pieces))
-	log.Printf("Left: %d", len(pm.pieces)-pm.DownloadedCount)
-
 	return false
 }
 
@@ -61,11 +51,9 @@ func (pm *PieceManager) ClaimPiece(index int) bool {
 		if !piece.IsDownloaded && !piece.IsClaimed {
 			piece.IsClaimed = true
 			log.Printf("Piece %d claimed", index)
-
 			return true
 		}
 	}
-
 	return false
 }
 
@@ -78,12 +66,10 @@ func (pm *PieceManager) MarkPieceDownloaded(index int, data []byte) {
 		if !piece.IsDownloaded {
 			dataCopy := make([]byte, len(data))
 			copy(dataCopy, data)
-
 			piece.Data = &dataCopy
 			piece.IsDownloaded = true
 			piece.IsClaimed = false
 			pm.DownloadedCount++
-
 			log.Printf("Piece %d marked as downloaded: %x", index, *piece.Data)
 		}
 	}
@@ -98,7 +84,6 @@ func (pm *PieceManager) VerifyPiece(index int) error {
 	if !exists {
 		return fmt.Errorf("piece %d does not exist", index)
 	}
-
 	if !piece.IsDownloaded || piece.Data == nil {
 		return fmt.Errorf("piece %d is not downloaded or data is nil", index)
 	}
@@ -110,25 +95,6 @@ func (pm *PieceManager) VerifyPiece(index int) error {
 	if !bytes.Equal(computedHash, piece.Hash) {
 		return fmt.Errorf("piece %d hash does not match the expected hash", index)
 	}
-
+	log.Printf("Piece:%d, Verified for Integrity", index)
 	return nil
-}
-
-// GetPieceData returns the data stored for the index of a piece
-func (pm *PieceManager) GetPieceData(index int) ([]byte, error) {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
-
-	piece, exists := pm.pieces[index]
-	if !exists {
-		return nil, fmt.Errorf("piece %d does not exist", index)
-	}
-
-	if !piece.IsDownloaded || piece.Data == nil {
-		return nil, fmt.Errorf("piece %d is not downloaded or data is nil", index)
-	}
-
-	dataCopy := make([]byte, len(*piece.Data))
-	copy(dataCopy, *piece.Data)
-	return dataCopy, nil
 }

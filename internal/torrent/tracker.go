@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	_peerIDPrefix    = "-GO0001-"
-	_compactPeerList = 0
+	peerIDPrefix    = "-GO0001-"
+	compactPeerList = 0
 )
 
 // ContactTrackers tries to contact multiple trackers and gather peers
@@ -33,17 +33,15 @@ func ContactTrackers(trackers []string, infoHash, peerID, event string, uploaded
 			log.Printf("Error contacting tracker %s: %v", trackerURL, err)
 			continue
 		}
-
 		if len(tracker_peerIP_list) > 0 && len(tracker_peerID_list) > 0 && len(tracker_peerID_list) == len(tracker_peerIP_list) {
 			peer_address_list = append(peer_address_list, tracker_peerIP_list...)
 			peerID_list = append(peerID_list, tracker_peerID_list...)
 
-			//TODO After the first successful announce, the event will be empty for simplicity unless changed later
+			// TODO: After the first successful announce, the event will be empty for simplicity unless changed later
 			event = ""
 		}
 		if len(tracker_peerIP_list) > 0 && len(tracker_peerID_list) == 0 {
 			peer_address_list = append(peer_address_list, tracker_peerIP_list...)
-
 			unknown_peerID_list := make([]string, len(tracker_peerIP_list))
 			for i := range tracker_peerIP_list {
 				unknown_peerID_list[i] = ""
@@ -77,14 +75,13 @@ func GeneratePeerID() (string, error) {
 	peerID := make([]byte, 20)
 
 	// Copy the prefix into the first 8 bytes
-	copy(peerID[:8], _peerIDPrefix)
+	copy(peerID[:8], peerIDPrefix)
 
 	// Generate 12 random bytes for the remaining part
 	_, err := rand.Read(peerID[8:])
 	if err != nil {
 		return "", fmt.Errorf("error generating random peer ID: %w", err)
 	}
-
 	return string(peerID), nil
 }
 
@@ -148,7 +145,7 @@ func buildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloa
 	addQueryParam(params, "uploaded", strconv.Itoa(uploaded))
 	addQueryParam(params, "downloaded", strconv.Itoa(downloaded))
 	addQueryParam(params, "left", strconv.Itoa(left))
-	addQueryParam(params, "compact", strconv.Itoa(_compactPeerList))
+	addQueryParam(params, "compact", strconv.Itoa(compactPeerList))
 
 	if event != "" {
 		addQueryParam(params, "event", event)
@@ -156,7 +153,6 @@ func buildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloa
 
 	// attach query parameters to the URL
 	trackerURL.RawQuery = params.Encode()
-
 	return trackerURL.String(), nil
 }
 
@@ -183,7 +179,6 @@ func sendGetRequest(url string, client *http.Client) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error reading response body: %w", err)
 	}
-
 	return body, nil
 }
 
@@ -226,6 +221,5 @@ func extractPeersFromTracker(trackerURL, infoHash, peerID, event string, uploade
 	if err != nil {
 		return nil, nil, fmt.Errorf("error extracting peers: %w", err)
 	}
-
 	return peer_id_list, peerList, nil
 }

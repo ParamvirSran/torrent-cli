@@ -12,13 +12,11 @@ func ExtractPeers(trackerResp map[string]any) ([]string, []string, error) {
 		peer_id_list []string
 		err          error
 	)
-
 	if peers, ok := trackerResp["peers"].(string); ok {
 		peerList, err = parseCompactPeers([]byte(peers))
 	} else if peers, ok := trackerResp["peers"].([]any); ok {
 		peer_id_list, peerList, err = parseDictionaryPeers(peers)
 	}
-
 	return peer_id_list, peerList, err
 }
 
@@ -28,7 +26,6 @@ func parseDictionaryPeers(peers []any) ([]string, []string, error) {
 		peer_id_list []string
 		peerList     []string
 	)
-
 	for _, peer := range peers {
 		if peerMap, ok := peer.(map[string]any); ok {
 			ip, ipOk := peerMap["ip"].(string)
@@ -45,7 +42,6 @@ func parseDictionaryPeers(peers []any) ([]string, []string, error) {
 			return nil, nil, fmt.Errorf("invalid peer format, expecting dictionary format from tracker")
 		}
 	}
-
 	return peer_id_list, peerList, nil
 }
 
@@ -63,6 +59,5 @@ func parseCompactPeers(peers []byte) ([]string, error) {
 		peer := fmt.Sprintf("%s:%d", ip, port)
 		peerList = append(peerList, peer)
 	}
-
 	return peerList, nil
 }

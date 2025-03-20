@@ -5,11 +5,6 @@ import (
 	"sync"
 )
 
-const (
-	ProtocolString = "BitTorrent protocol"
-	ProtocolLength = byte(len(ProtocolString))
-)
-
 // MessageID will identify which message we are dealing with in the Peer Wire Protocol
 type MessageID byte
 
@@ -25,6 +20,11 @@ const (
 	MsgCancel        MessageID = 8
 	MsgPort          MessageID = 9
 	MsgKeepAlive     MessageID = 255
+)
+
+const (
+	ProtocolString = "BitTorrent protocol"
+	ProtocolLength = byte(len(ProtocolString))
 )
 
 // Torrent is the type that represents a torrents metadata from its .torrent file
@@ -100,14 +100,16 @@ type Peer struct {
 	PeerID    string
 	Address   string
 	PeerState PeerState
+	PieceList []int
 }
 
 // NewPeer returns a pointer to a peer type
-func NewPeer(peerID, address string, peerState PeerState) *Peer {
+func NewPeer(peerID, address string) *Peer {
 	return &Peer{
 		PeerID:    peerID,
 		Address:   address,
-		PeerState: peerState,
+		PeerState: NewPeerState(),
+		PieceList: []int{},
 	}
 }
 
@@ -154,7 +156,6 @@ func NewHandshake(infohash []byte, clientID []byte) ([]byte, error) {
 		Infohash:             [20]byte(infohash),
 		PeerID:               [20]byte(clientID),
 	}
-
 	return handshake.SerializeHandshake(), nil
 }
 

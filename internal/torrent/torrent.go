@@ -46,7 +46,6 @@ func ParseTorrentFile(torrentPath string) (*types.Torrent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error parsing metainfo: %v", err)
 	}
-
 	return torrent, nil
 }
 
@@ -61,6 +60,7 @@ func parseMetainfo(torrentDict map[string]any) (*types.Torrent, error) {
 	if !ok {
 		return nil, fmt.Errorf("info dictionary missing or of incorrect type")
 	}
+
 	info, pieceManager, err := parseInfo(infoDict)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse info dictionary: %w", err)
@@ -72,23 +72,18 @@ func parseMetainfo(torrentDict map[string]any) (*types.Torrent, error) {
 	if comment, ok := torrentDict[_keyComment].(string); ok {
 		torrentFile.Comment = comment
 	}
-
 	if createdBy, ok := torrentDict[_keyCreatedBy].(string); ok {
 		torrentFile.CreatedBy = createdBy
 	}
-
 	if encoding, ok := torrentDict[_keyEncoding].(string); ok {
 		torrentFile.Encoding = encoding
 	}
-
 	if private, ok := torrentDict[_keyPrivate].(int); ok {
 		torrentFile.Info.Private = &private
 	}
-
 	if creationDate, ok := torrentDict["creation date"].(int64); ok {
 		torrentFile.CreationDate = creationDate
 	}
-
 	return torrentFile, nil
 }
 
@@ -126,19 +121,16 @@ func parseInfo(infoDict map[string]any) (*types.InfoDictionary, *types.PieceMana
 	if err := parseNameAndPieceLength(infoDict, info); err != nil {
 		return nil, nil, err
 	}
-
 	if err := parsePiecesField(infoDict, info); err != nil {
 		return nil, nil, err
 	}
-
 	if err := parseLengthOrFiles(infoDict, info); err != nil {
 		return nil, nil, err
 	}
 
+	// Initialize PieceManager
 	pieceCount := len(info.Pieces) / 20
 	pieceLength := info.PieceLength
-
-	// Initialize PieceManager
 	pieceManager := types.NewPieceManager(pieceCount, pieceLength)
 
 	// Populate the PieceManager with piece hashes
@@ -146,7 +138,6 @@ func parseInfo(infoDict map[string]any) (*types.InfoDictionary, *types.PieceMana
 		pieceHash := info.Pieces[i*20 : i*20+20]
 		pieceManager.AddPiece(i, pieceHash)
 	}
-
 	return info, pieceManager, nil
 }
 
@@ -237,6 +228,5 @@ func parseFile(fileDict map[string]any) (types.File, error) {
 	} else {
 		return fileInfo, fmt.Errorf("path missing or of incorrect type")
 	}
-
 	return fileInfo, nil
 }
